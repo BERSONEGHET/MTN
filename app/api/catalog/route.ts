@@ -1,6 +1,6 @@
 import {env} from "cloudflare:workers";
 import {getChatGPTUser} from "../../chatgpt-auth";
-import {lookup,colors,sizes,genders,prefixFor,makeSku,MIN_PRODUCT_SEQUENCE,variationBase,variationSku} from "../../../lib/catalog.mjs";
+import {lookup,colors,sizes,genders,prefixFor,makeSku,MIN_PRODUCT_SEQUENCE,variationBase,variationSku,productName} from "../../../lib/catalog.mjs";
 export const dynamic="force-dynamic";
 const response=(data:any,status=200)=>Response.json(data,{status,headers:{"Cache-Control":"private, no-store"}});
 const uuid=()=>crypto.randomUUID();
@@ -31,7 +31,7 @@ export async function POST(request:Request){
  const prepared=body.rows.map((r:any)=>{
  if(!Number.isInteger(r.sourceRow)||r.sourceRow<2)throw new Error("Linha inválida.");
  const sku=short(r.sku,60);if(!sku)throw new Error("SKU ausente.");
- const name=short(r.name);if(!name)throw new Error("Produto ausente.");
+ const name=productName(r.name);if(!name)throw new Error("Produto ausente.");
  const match=sku.match(/^([^0-9]+)([0-9]{8})$/);
  const seq=match?Number(match[2].slice(0,4)):null;
  const gender=match&&/[FMU]$/.test(match[1])?match[1].slice(-1):"";
@@ -42,6 +42,15 @@ export async function POST(request:Request){
  const maxSeq=Math.max(MIN_PRODUCT_SEQUENCE-1,...prepared.map((x:any)=>x.seq||0));
  statements.push(db().prepare("INSERT INTO counters(owner,value) VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET value=MAX(value,excluded.value)").bind(owner,maxSeq));
  const results=await db().batch(statements);return response({ok:true,imported:results.slice(0,-1).reduce((n,r)=>n+(r.meta.changes||0),0)});
+ }
+ if(body.action==="delete"){
+ const id=short(body.id,250);if(!id||!Number.isInteger(body.version)||body.version<1)throw new Error("Identificação do cadastro inválida.");
+ const current=await db().prepare("SELECT version FROM products WHERE id=? AND owner=?").bind(id,owner).first<any>();
+ if(!current)return response({error:"Cadastro não encontrado. Atualize a tabela."},404);
+ if(current.version!==body.version)return response({error:"Este item foi alterado em outra janela. Atualize antes de excluir."},409);
+ const result=await db().prepare("DELETE FROM products WHERE id=? AND owner=? AND version=?").bind(id,owner,body.version).run();
+ if(!result.meta.changes)return response({error:"Este cadastro mudou em outra janela. Atualize antes de excluir."},409);
+ return response({ok:true,deletedId:id});
  }
  if(body.action==="update"){
  const r=body.row;const quantity=qty(r.quantity),cost=money(r.cost),price=money(r.price,true);
@@ -79,7 +88,7 @@ export async function POST(request:Request){
  }
  else if(body.modelId){model=await db().prepare("SELECT * FROM models WHERE id=? AND owner=?").bind(short(body.modelId),owner).first();if(!model)throw new Error("Produto não encontrado.");}
  else {
- const name=short(body.name);const g=lookup(genders,body.gender);if(!name||!g)throw new Error("Preencha produto e gênero.");
+ const name=productName(body.name);const g=lookup(genders,body.gender);if(!name||!g)throw new Error("Preencha produto e gênero.");
  const prefix=prefixFor(name);
  const next=await db().prepare("INSERT INTO counters(owner,value) VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET value=MAX(value,?)+1 RETURNING value").bind(owner,MIN_PRODUCT_SEQUENCE,MIN_PRODUCT_SEQUENCE-1).first<{value:number}>();
  if(!next||next.value>9999)throw new Error("A sequência de quatro dígitos foi esgotada.");

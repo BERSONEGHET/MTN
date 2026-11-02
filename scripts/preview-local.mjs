@@ -1,6 +1,8 @@
 import {readFileSync,writeFileSync,mkdirSync} from "node:fs";
 import {spawn,spawnSync} from "node:child_process";
 import path from "node:path";
+import {prepareOlistKey} from "./olist-local-key.mjs";
+prepareOlistKey();
 const root=process.cwd();
 const hostname="127.0.0.1",port=5173,origin="http://"+hostname+":"+port;
 const manifest=JSON.parse(readFileSync(path.join(root,".openai/hosting.json"),"utf8"));
@@ -19,7 +21,7 @@ console.log("Preparando somente o banco de dados LOCAL da previa...");
 const migrated=spawnSync(process.execPath,["--import","./scripts/sites-env.mjs",wrangler,"d1","migrations","apply","DB","--local","--config",configPath,"--persist-to",".wrangler/state"],{cwd:root,env:localEnv,stdio:"inherit",windowsHide:true});
 if(migrated.error||migrated.status!==0){writeFileSync(logPath,"FALHA_BANCO_LOCAL");throw migrated.error||new Error("Nao foi possivel preparar o banco local.");}
 console.log("\nIniciando previa somente neste computador. Mantenha esta janela aberta.");
-console.log("Nenhum produto sera enviado ao Olist ou Nuvemshop.\n");
+console.log("Envios ao Olist exigem conexao e confirmacao na aba Integracoes.\n");
 const server=spawn(process.execPath,["scripts/run-framework.mjs","dev","--hostname",hostname],{cwd:root,env:localEnv,stdio:"inherit",windowsHide:true});
 let done=false;server.on("exit",(code)=>{done=true;process.exitCode=code||0;});
 process.once("SIGINT",()=>server.kill("SIGINT"));
